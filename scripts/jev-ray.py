@@ -333,11 +333,22 @@ def build_digest(owner: str, repo: str, gh: GitHub) -> dict:
     return {"state": "\n\n".join(parts), "archived": bool(meta.get("archived"))}
 
 
+def resolve_model(provider: str = "typesafe") -> str:
+    """The model a cached answer belongs to, without needing a key.
+
+    scan() has to key the cache even offline, where no Jev is built because there
+    may be no API key at all, so the model is resolved apart from Jev.__init__ —
+    keeping the two in one place is what stops a cache from handing one model's
+    answers to another.
+    """
+    return os.environ.get("JEV_MODEL") or PROVIDERS[provider][1]
+
+
 class Jev:
     def __init__(self, provider: str = "typesafe", key: str | None = None) -> None:
-        endpoint, model, env = PROVIDERS[provider]
+        endpoint, _, env = PROVIDERS[provider]
         self.endpoint = os.environ.get("JEV_ENDPOINT") or endpoint
-        self.model = os.environ.get("JEV_MODEL") or model
+        self.model = resolve_model(provider)
         self.key = key or os.environ.get(env) or os.environ.get("JEV_API_KEY")
         if not self.key:
             raise SystemExit(f"jev-ray: set {env} (or JEV_API_KEY) to call Jev")
@@ -475,7 +486,13 @@ def classify(entry: Entry, answers: dict, th: Thresholds, support: dict,
 
 
 class Cache:
-    """Answers keyed by (url, digest, questions), so re-running or re-tuning is free."""
+    """Answers keyed by (url, digest, questions, model), so re-running or re-tuning is free.
+
+    The model is part of the key because an answer is that model's judgment:
+    without it, whatever populated the cache first is later reported as another
+    model's decision, which is exactly what `evaluate` measures. The endpoint is
+    deliberately left out — it is transport, and tests override it per run.
+    """
 
     def __init__(self, path: Path | None) -> None:
         self.path = path
@@ -484,8 +501,8 @@ class Cache:
             self.data = json.loads(path.read_text(encoding="utf-8"))
 
     @staticmethod
-    def key(url: str, state: str, questions: dict) -> str:
-        blob = json.dumps([url, state, questions], sort_keys=True).encode()
+    def key(url: str, state: str, questions: dict, model: str) -> str:
+        blob = json.dumps([url, state, questions, model], sort_keys=True).encode()
         return hashlib.sha256(blob).hexdigest()
 
     def save(self) -> None:
@@ -495,7 +512,7 @@ class Cache:
 
 
 def scan(entries: list[Entry], *, jev: Jev | None, gh: GitHub, cache: Cache,
-         questions: dict, workers: int, offline: bool = False) -> dict[str, dict]:
+         questions: dict, model: str, workers: int, offline: bool = False) -> dict[str, dict]:
     """Return {url: {"answers": ..., "archived": ...} | {"skip"/"error": reason}}."""
 
     def one(entry: Entry) -> tuple[str, dict]:
@@ -510,7 +527,7 @@ def scan(entries: list[Entry], *, jev: Jev | None, gh: GitHub, cache: Cache,
                 cache.data[digest_key] = digest
             if "error" in digest:
                 return entry.url, {"error": digest["error"]}
-            key = Cache.key(entry.url, digest["state"], questions)
+            key = Cache.key(entry.url, digest["state"], questions, model)
             if key not in cache.data:
                 if offline or jev is None:
                     return entry.url, {"skip": "no cached answers (offline)"}
@@ -684,10 +701,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     questions = build_questions(load_vocabulary())
+    # Resolved once, outside Jev, because an offline run still has to key the cache.
+    model = resolve_model(args.provider)
     cache = Cache(None if args.no_cache else args.cache)
     jev = None if args.offline else Jev(args.provider)
     raw = scan(entries, jev=jev, gh=GitHub(), cache=cache, questions=questions,
-               workers=args.workers, offline=args.offline)
+               workers=args.workers, model=model, offline=args.offline)
     if jev and jev.input_tokens:
         # Published rate at the time of writing: $0.042 per million input tokens, output free.
         print(f"[jev-ray] {jev.input_tokens} input tokens ≈ ${jev.input_tokens * 0.042 / 1e6:.4f}"

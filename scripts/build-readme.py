@@ -197,6 +197,7 @@ CATEGORIES = [
     "calibration-research.md",
     "infra-sdks-integrations.md",
     "game-simulation.md",
+    "robotics-physical.md",
     "finance-trading.md",
     "compliance-legal.md",
     "content-moderation.md",
@@ -261,6 +262,7 @@ def parse_category(filename: str) -> Category:
     rendered: list[str] = []
     tagged: list[tuple[str, dict[str, str]]] = []
     previous_blank = False
+    unparseable = 0
     for line in raw_entry_lines:
         stripped = line.strip()
         if not stripped or stripped.startswith("<!--"):
@@ -274,6 +276,13 @@ def parse_category(filename: str) -> Category:
             continue
         if line.startswith("- ["):
             out_line, tags = render_entry(line)
+            # render_entry 返回原行，意味着 ENTRY_RE 没匹配上 —— 例如
+            # `- [name] ( url )` 在链接两侧多了空格。这种行会**静默**丢掉星标
+            # badge 与 agent 索引，而漂移检查看不出来（重新生成的 README 带着
+            # 同样那一行）。所以要主动出声。
+            if out_line == line and not ENTRY_RE.match(line):
+                print(f"⚠️  parse: entry line does not match the entry format — {line[:88]}")
+                unparseable += 1
             rendered.append(out_line)
             if tags:
                 name = re.match(r"- \[([^\]]+)\]\(([^)]+)\)", line)
@@ -282,6 +291,14 @@ def parse_category(filename: str) -> Category:
 
     while rendered and not rendered[-1].strip():
         rendered.pop()
+
+    # 对账：count 数的是 `- [` 开头的行，渲染后如果少于它，说明有条目在解析中丢了
+    rendered_entries = sum(1 for line in rendered if line.startswith("- ["))
+    if count != rendered_entries:
+        print(
+            f"⚠️  parse: {filename} has {count} entry lines but {rendered_entries} rendered "
+            f"— {count - rendered_entries} dropped"
+        )
 
     if count == 0:
         rendered = ["_No direct Jev examples added yet._"]

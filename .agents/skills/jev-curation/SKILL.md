@@ -30,6 +30,10 @@ Update category files first, then refresh `README.md` from the current category 
 Always use `scripts/build-readme.py` instead of hand-editing the aggregate.
 `tags.json` holds the entry tag vocabulary; the table in `CONTRIBUTING.md` is
 generated from it, so add a tag value there rather than to either document.
+An `agent` value also needs an evidence rule in `SUPPORT` in
+`scripts/audit-tags.py`: without one, entries carrying it are never checked
+against their own text. The audit names any value it has no rule for, so add
+both in the same change.
 
 ## Hard inclusion rules
 
@@ -72,9 +76,9 @@ Use **`categories/related-practices-discussions.md`** for:
 
 when they show credible real practice signals but do not yet have a strong standalone repo or case page.
 
-Main categories: classification-routing, verification-guardrails, scoring-ranking, agent-decisions, data-labeling-curation, evaluation-benchmarking, calibration-research, infra-sdks-integrations, related-practices-discussions.
-
-Open categories still being seeded: content-moderation, compliance-legal, game-simulation, scientific-pipelines.
+The category list, their order on the homepage, and which files are still being
+seeded all live in `CATEGORIES` and `OPEN_TRACKING` in `scripts/build-readme.py` —
+read them there rather than from a copy that goes stale.
 
 ## Working strategy
 
@@ -103,7 +107,32 @@ Prefer medium-complexity searches such as:
 
 Avoid very long advanced-search expressions when the adapter is unstable.
 
-### 3. Chinese + English
+### 3. Industrial and physical-world channels
+
+The physical side of the ecosystem is invisible to every name search above: `jev ros2`,
+`jev embedded`, `jev plc` and `jev industrial` all return zero repositories, and the
+first entries in `robotics-physical.md` came from a web search instead. Search the
+sources that cover that industry, not the model name:
+
+- `gh search code 'api.typesafe.ai'` inside robotics and embedded repositories, or read
+  their tree directly — a factory integration rarely says "Jev" in its description.
+- ROS/ROS2 and embedded ecosystems: `gh search repos "ros2 decision model"`,
+  `gh search repos "plc ai classifier"`, `gh search repos "edge inference classifier"`.
+- Non-English industry writing. The 2–14 Hz decision-band framing — servo control around
+  1000 Hz, VLA models 5–50 Hz, task planning under 1 Hz — came from a Japanese robotics
+  column, not from GitHub.
+- **Search by endpoint, not by name.** `api.typesafe.ai` and `/v1/systemone` appear in
+  code long before anyone writes the word Jev in a description. Two collisions make name
+  search unreliable here: **System One is also an unrelated company** (systemone.com,
+  flooring and defect software), and MES, SCADA and PLC are generic acronyms that return
+  other people's products in prose search.
+- **Expect the deployments to be private, and say so.** Factories rarely publish their
+  in-house classifier. What stays citable is the enabling layer (OPC-UA, Modbus, BACnet
+  and IEC 61131-3 tooling, bounded-action runtimes), vendor case studies and conference
+  talks. Absence of a public deployment is not evidence of absence of use — record what
+  is public and label it as such rather than concluding the field is empty.
+
+### 4. Chinese + English
 
 Search in both languages when useful. Useful Chinese patterns:
 
@@ -236,7 +265,7 @@ When a contributor opens a PR:
 1. Verify the repository, do not just read the PR body — file tree, source, tests, CI, commit history, and whether the code really calls the Jev API.
 2. If the repository is thinner than the entry implies (README-only claims, no runnable check, docs outweighing code), say so in a review comment and ask for the missing evidence rather than merging or silently rejecting it.
 3. When an author already has three entries accepted in the current pass, state the rule in the PR comment *before* acting, and queue the extra entries to a later pass instead of rejecting them. Queued entries count against the pass that takes them, not the one that queued them, so honour the queue even when it lands the author a fourth or fifth entry inside the same week. Link the CONTRIBUTING section so the contributor knows it is policy, not a judgement about them. Queue by submission order, never by quality — picking "the best three" turns the rule into a hidden quality verdict, which is exactly what it exists to avoid. If one of the queued entries has more stars than the merged ones, say so explicitly in the comment.
-4. **Bulk AI-generated submissions are a rule, not a preference** (CONTRIBUTING → "Rule: do not submit bulk drops of AI-generated projects"). Before merging a cluster of same-author, same-day repositories, check for a shared scaffold (`AGENTS.md` / `CLAUDE.md` / `STATE.md`), a common README template, or single-commit histories — those mark one project family, which counts as **one** submission, so merge at most one and queue the rest. Disclose-or-pause also applies: if a submission was generated and not disclosed, hold the author's whole pending batch until they say so.
+Keep a PR reply short: the rule in one line, what happens next in one line, then stop. No restating the contributor's work, no explaining the queue's arithmetic, no advice they did not ask for. 4. **Bulk AI-generated submissions are a rule, not a preference** (CONTRIBUTING → "Rule: do not submit bulk drops of AI-generated projects"). Before merging a cluster of same-author, same-day repositories, check for a shared scaffold (`AGENTS.md` / `CLAUDE.md` / `STATE.md`), a common README template, or single-commit histories — those mark one project family, which counts as **one** submission, so merge at most one and queue the rest. Disclose-or-pause also applies: if a submission was generated and not disclosed, hold the author's whole pending batch until they say so.
 5. Never edit a contributor's wording purely for style; do fix inaccurate claims.
 6. README.md is generated — when a PR conflicts there, rebase the branch and regenerate it (`python3 scripts/build-readme.py`) rather than hand-resolving. For conflicts in a category file, keep main's version and append the PR's new line.
 7. An entry written **only** into `README.md` (no category file) will be silently erased by the next generator run. Move it into the right category file, regenerate, amend the commit, and push back to the contributor's branch — then say so in a comment, including that the mistake is easy to make from the current docs.

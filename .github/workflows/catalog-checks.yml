@@ -62,6 +62,18 @@ jobs:
             exit 1
           fi
 
+      - name: Fail on unparseable entries
+        id: parse
+        if: ${{ !cancelled() && steps.regen.outcome == 'success' }}
+        run: |
+          # 条目行格式错（例如链接两侧多了空格）时，生成器只跳过渲染，不会改文件，
+          # 漂移检查因此看不见 —— 代价是那一条拿不到星标、也进不了索引。
+          if grep -q "⚠️  parse:" build.log; then
+            echo "::error::An entry line does not match the entry format, so it silently loses its badge and index entry."
+            grep "⚠️  parse:" build.log | tee "$REPORT/parse.txt"
+            exit 1
+          fi
+
       - name: Fail on duplicate entries
         id: duplicates
         if: ${{ !cancelled() && steps.regen.outcome == 'success' }}

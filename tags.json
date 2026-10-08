@@ -42,6 +42,11 @@
           "color": "2D5BD7",
           "anchor": "DeepSeek blue #4D6BFE",
           "definition": "Targets DeepSeek Harness (dsh). Not DeepSeek models in general, which many entries call without targeting its harness."
+        },
+        "openclaw": {
+          "label": "OpenClaw",
+          "color": "B91C1C",
+          "definition": "Targets the OpenClaw agent through its plugin, hook or skill API. Not projects that merely have claw in their name."
         }
       }
     },

@@ -20,9 +20,16 @@ Usage: python3 scripts/audit-tags.py [categories_dir]
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
+
+# tags.json holds the tag vocabulary once (issue #138, commit 7009269). The
+# renderer reads it, and CONTRIBUTING's table is generated from it, so neither
+# can drift from it. This audit is the third consumer of the same list.
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+TAGS_PATH = REPO_ROOT / "tags.json"
 
 # What an entry must mention for the agent tag to be supported.
 # `multi` is a judgement about breadth, so no single name can confirm it.
@@ -33,6 +40,7 @@ SUPPORT = {
     "cursor":      r"\bcursor\b",
     "cline":       r"\bcline\b",
     "dsh":         r"deepseek[ -]?harness|\bdsh\b",
+    "openclaw":    r"openclaw",
     "multi":       None,
 }
 
@@ -77,6 +85,46 @@ def audit(root: pathlib.Path) -> tuple[list, list]:
 
 
 
+def load_agent_values(path: pathlib.Path = TAGS_PATH) -> list[str]:
+    """The agent values tags.json accepts, in file order."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(f"{path}: file not found")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{path}: invalid JSON at line {exc.lineno}: {exc.msg}")
+    values = raw.get("axes", {}).get("agent", {}).get("values", {})
+    # tags.json annotates with $-prefixed keys, which are not vocabulary.
+    return [value for value in values if not value.startswith("$")]
+
+
+def check_support_coverage(vocabulary: list[str]) -> list[str]:
+    """Agent values SUPPORT has no rule for, so entries tagged with them are never checked.
+
+    Adding a value to tags.json is meant to be a one-file edit — that is what
+    moving the vocabulary out of the renderer bought (commit 7009269 removed the
+    second and third copies). The evidence patterns below are still hand-written,
+    so the edit is two files in practice, and a forgotten second one fails open
+    rather than loudly:
+
+      audit()       `SUPPORT.get(agent)` is None for an unknown value, so both
+                    arms skip it — no error for an unsupported tag, and no notice
+                    for an untagged entry that names it.
+      jev-ray.py    `support.get(agent)` short-circuits the hold-back at classify()
+                    — it proposes the tag without any supporting text, on the note
+                    that audit-tags.py would fail, which it no longer does.
+
+    Nothing else in the job catches it either: build-readme.py renders whatever
+    tags.json allows, so the value reaches the "Find by coding agent" index with
+    no check anywhere asserting that the entries under it actually name it.
+
+    This compares keys, not values: `multi` is deliberately None because breadth
+    is a judgement no single name can confirm, which is itself a recorded answer.
+    The `type` axis is not compared at all — nothing here checks its evidence.
+    """
+    return [value for value in vocabulary if value not in SUPPORT]
+
+
 def check_no_rendered_badges(paths) -> int:
     """分类文件必须用源码标签 `{agent: x}`，不能写渲染后的 badge。
 
@@ -94,10 +142,12 @@ def check_no_rendered_badges(paths) -> int:
 
 def main(argv: list[str]) -> int:
     root = pathlib.Path(argv[1] if len(argv) > 1 else "categories")
+    tags_path = pathlib.Path(argv[2]) if len(argv) > 2 else TAGS_PATH
     if not root.is_dir():
         raise SystemExit(f"{root}: not a directory")
 
     rendered = check_no_rendered_badges(sorted(root.glob("*.md")))
+    uncovered = check_support_coverage(load_agent_values(tags_path))
 
     unsupported, unnoticed = audit(root)
 
@@ -107,11 +157,17 @@ def main(argv: list[str]) -> int:
     for name, agent, filename in unsupported:
         print(f"error: {name} ({filename}) is tagged {agent}, which its text does not mention")
 
-    if unsupported or rendered:
+    for value in uncovered:
+        print(f"error: agent value `{value}` is in {tags_path.name} but has no SUPPORT rule, "
+              f"so an entry tagged {value} is never checked")
+
+    if unsupported or rendered or uncovered:
         if unsupported:
             print(f"\n{len(unsupported)} tag(s) unsupported by the entry text.")
         if rendered:
             print(f"{rendered} entry/badge line(s) rendered instead of tagged.")
+        if uncovered:
+            print(f"{len(uncovered)} agent value(s) with no SUPPORT rule.")
         return 1
 
     print(f"tags check out ({len(unnoticed)} notice(s)).")

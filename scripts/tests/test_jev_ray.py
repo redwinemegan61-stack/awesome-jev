@@ -164,6 +164,27 @@ class Lines(unittest.TestCase):
                          "a\n[code block omitted]\nrun [code]")
 
 
+# --------------------------------------------------------------------------- model identity
+
+
+class ModelIdentity(unittest.TestCase):
+    """A cache holds a specific model's answers, so the model belongs in the key."""
+
+    def test_another_model_does_not_read_the_first_models_answers(self):
+        questions = ray.build_questions(ray.load_vocabulary())
+        first = ray.Cache.key("https://github.com/o/pi-x", "state", questions, "jev-latest")
+        self.assertEqual(first, ray.Cache.key("https://github.com/o/pi-x", "state", questions, "jev-latest"))
+        self.assertNotEqual(first, ray.Cache.key("https://github.com/o/pi-x", "state", questions, "jev-2"))
+
+    def test_model_resolves_without_an_api_key(self):
+        # --offline keys the cache too, so resolving the model must not need Jev.
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(ray.resolve_model("typesafe"), "jev-latest")
+            self.assertEqual(ray.resolve_model("openrouter"), "~typesafe/jev-latest")
+        with mock.patch.dict(os.environ, {"JEV_MODEL": "jev-2"}, clear=True):
+            self.assertEqual(ray.resolve_model("typesafe"), "jev-2")
+
+
 # --------------------------------------------------------------------------- end to end
 
 
@@ -235,9 +256,9 @@ class EndToEnd(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_cli(self, *argv):
+    def run_cli(self, *argv, **env_extra):
         out = io.StringIO()
-        with mock.patch.dict(os.environ, self.env), mock.patch.object(ray, "CATEGORIES_DIR", self.cats), \
+        with mock.patch.dict(os.environ, {**self.env, **env_extra}), mock.patch.object(ray, "CATEGORIES_DIR", self.cats), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             code = ray.main(list(argv) + ["--cache", str(self.cats / "cache.json")])
         return code, out.getvalue()
@@ -261,6 +282,26 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(FakeServer.requests, [])  # digest unchanged, answers cached
         code, out = self.run_cli("scan", "--offline")
         self.assertIn("propose  pi-x", out)
+
+    def test_each_model_is_asked_separately_and_kept_separately(self):
+        # The answers are that model's judgment: reusing them for another model is
+        # how `evaluate` would report one model's precision under another's name.
+        self.run_cli("scan")
+        self.assertNotEqual(FakeServer.requests, [])
+
+        FakeServer.requests.clear()
+        self.run_cli("scan")
+        self.assertEqual(FakeServer.requests, [])  # the same model is served from cache
+
+        FakeServer.requests.clear()
+        code, _ = self.run_cli("scan", JEV_MODEL="jev-2")
+        self.assertEqual(code, 0)
+        self.assertNotEqual(FakeServer.requests, [],
+                            "jev-2 was never asked: jev-latest's answers were served as its own")
+
+        FakeServer.requests.clear()
+        self.run_cli("scan")  # back to the first model
+        self.assertEqual(FakeServer.requests, [], "each model's answers should stay cached side by side")
 
     def test_patch_dry_run_then_write(self):
         code, diff = self.run_cli("patch", "--dry-run")
